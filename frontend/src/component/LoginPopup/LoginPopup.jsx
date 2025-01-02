@@ -10,7 +10,8 @@ const LoginPopup = ({setShowLogin}) => {
     const [data, setData] = useState({
       name: "",
       email: "",
-      password: ""
+      password: "",
+      gender: ""
     });
     
     const onChangeHandler = (event) => {
@@ -27,20 +28,24 @@ const LoginPopup = ({setShowLogin}) => {
       event.preventDefault();
       const endpoint = currState === "Login" ? "/api/user/login" : "/api/user/register";
       const endpointUrl = url + endpoint;
-  
-      
-        const response = await axios.post(endpointUrl, data);
-  
-        if (response.data.success) {
-          setToken(response.data.token);
-          localStorage.setItem("token", response.data.token);
-          setShowLogin(false);
-          window.location.reload();
-        } else {
-          alert(response.data.message);
-        }
-       
+    
+      const payload = {
+        email: data.email,
+        password: data.password
+      };
+    
+      const response = await axios.post(endpointUrl, payload);
+    
+      if (response.data.success) {
+        setToken(response.data.token);
+        localStorage.setItem("token", response.data.token);
+        setShowLogin(false);
+        window.location.reload();
+      } else {
+        alert(response.data.message);
+      }
     };
+    
 
     return (
       <div className='login-popup'>

@@ -1,24 +1,45 @@
-import userModel from "../models/user.model.js";
+import sql from "mssql";
+import config from "../config/db.js";
 
 const addCart = async (req, res) => {
     try {
-        if (!req.body.userId || !req.body.itemId) {
+        const { userId, itemId } = req.body;
+        if (!userId || !itemId) {
             return res.status(400).json({ success: false, message: "User ID and Item ID are required" });
         }
 
-        let userData = await userModel.findById(req.body.userId);
-        if (!userData) {
+        const pool = await sql.connect(config);
+
+        // Check if user exists
+        const userResult = await pool.request()
+            .input("userId", sql.Int, userId)
+            .query("SELECT * FROM MembershipDetail WHERE card_id = @userId");
+
+        if (userResult.recordset.length === 0) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        let cartData = userData.cartData || {};
-        if (!cartData[req.body.itemId]) {
-            cartData[req.body.itemId] = 1;
+        // Check if item is already in the cart
+        const cartResult = await pool.request()
+            .input("userId", sql.Int, userId)
+            .input("itemId", sql.Int, itemId)
+            .query("SELECT * FROM Cart WHERE user_id = @userId AND item_id = @itemId");
+
+        if (cartResult.recordset.length === 0) {
+            // Add new item to cart
+            await pool.request()
+                .input("userId", sql.Int, userId)
+                .input("itemId", sql.Int, itemId)
+                .input("quantity", sql.Int, 1)
+                .query("INSERT INTO Cart (user_id, item_id, quantity) VALUES (@userId, @itemId, @quantity)");
         } else {
-            cartData[req.body.itemId] += 1;
+            // Update quantity of existing item in cart
+            await pool.request()
+                .input("userId", sql.Int, userId)
+                .input("itemId", sql.Int, itemId)
+                .query("UPDATE Cart SET quantity = quantity + 1 WHERE user_id = @userId AND item_id = @itemId");
         }
 
-        await userModel.findByIdAndUpdate(req.body.userId, { cartData });
         res.json({ success: true, message: "Item added to cart" });
     } catch (error) {
         console.error(error);
@@ -28,21 +49,46 @@ const addCart = async (req, res) => {
 
 const removeCart = async (req, res) => {
     try {
-        if (!req.body.userId || !req.body.itemId) {
+        const { userId, itemId } = req.body;
+        if (!userId || !itemId) {
             return res.status(400).json({ success: false, message: "User ID and Item ID are required" });
         }
 
-        let userData = await userModel.findById(req.body.userId);
-        if (!userData) {
+        const pool = await sql.connect(config);
+
+        // Check if user exists
+        const userResult = await pool.request()
+            .input("userId", sql.Int, userId)
+            .query("SELECT * FROM MembershipDetail WHERE card_id = @userId");
+
+        if (userResult.recordset.length === 0) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        let cartData = userData.cartData || {};
-        if (cartData[req.body.itemId] > 0) {
-            cartData[req.body.itemId] -= 1;
+        // Check if item is in the cart
+        const cartResult = await pool.request()
+            .input("userId", sql.Int, userId)
+            .input("itemId", sql.Int, itemId)
+            .query("SELECT * FROM Cart WHERE user_id = @userId AND item_id = @itemId");
+
+        if (cartResult.recordset.length === 0) {
+            return res.status(404).json({ success: false, message: "Item not found in cart" });
         }
 
-        await userModel.findByIdAndUpdate(req.body.userId, { cartData });
+        // Update quantity or remove item from cart
+        const item = cartResult.recordset[0];
+        if (item.quantity > 1) {
+            await pool.request()
+                .input("userId", sql.Int, userId)
+                .input("itemId", sql.Int, itemId)
+                .query("UPDATE Cart SET quantity = quantity - 1 WHERE user_id = @userId AND item_id = @itemId");
+        } else {
+            await pool.request()
+                .input("userId", sql.Int, userId)
+                .input("itemId", sql.Int, itemId)
+                .query("DELETE FROM Cart WHERE user_id = @userId AND item_id = @itemId");
+        }
+
         res.json({ success: true, message: "Removed from cart" });
     } catch (error) {
         console.error(error);
@@ -50,36 +96,38 @@ const removeCart = async (req, res) => {
     }
 };
 
-
 const getCart = async (req, res) => {
     try {
         const userId = req.user?.id;
-        console.log("Auth Token:", req.headers.token); // Debug log
-        console.log("User ID from token:", userId);    // Debug log
-
         if (!userId) {
-            return res.status(401).json({ 
-                success: false, 
-                message: "User not authenticated" 
-            });
+            return res.status(401).json({ success: false, message: "User not authenticated" });
         }
 
-        let userData = await userModel.findById(userId);
-        if (!userData) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "User not found" 
-            });
+        const pool = await sql.connect(config);
+
+        // Check if user exists
+        const userResult = await pool.request()
+            .input("userId", sql.Int, userId)
+            .query("SELECT * FROM MembershipDetail WHERE card_id = @userId");
+
+        if (userResult.recordset.length === 0) {
+            return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        let cartData = userData.cartData || {};
+        // Get cart items
+        const cartResult = await pool.request()
+            .input("userId", sql.Int, userId)
+            .query("SELECT * FROM Cart WHERE user_id = @userId");
+
+        const cartData = cartResult.recordset.reduce((acc, item) => {
+            acc[item.item_id] = item.quantity;
+            return acc;
+        }, {});
+
         res.json({ success: true, cartData });
     } catch (error) {
         console.error("Error in getCart:", error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Error detected" 
-        });
+        res.status(500).json({ success: false, message: "Error detected" });
     }
 };
 
